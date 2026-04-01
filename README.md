@@ -75,7 +75,7 @@ This project was built to demonstrate production RAG thinking — not just "make
 ## Project Structure
 
 ```
-docmind/
+DocMind-RAG-Intelligence-Platform/
 ├── backend/
 │   ├── main.py          # FastAPI app + CORS + router registration
 │   ├── ingest.py        # Document upload, chunking, embedding, storage
@@ -84,7 +84,7 @@ docmind/
 │   ├── requirements.txt
 │   └── .env             # GROQ_API_KEY
 │
-└── frontend/
+└── rag-frontend/
     ├── app/
     │   ├── page.tsx          # Chat interface with persistent history
     │   ├── upload/page.tsx   # Drag-and-drop document ingestion
@@ -108,8 +108,8 @@ docmind/
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/yourusername/docmind.git
-cd docmind
+git clone https://github.com/sniiitik/DocMind-RAG-Intelligence-Platform.git
+cd DocMind-RAG-Intelligence-Platform
 ```
 
 ### 2. Backend setup
