@@ -1,0 +1,57 @@
+# ======================
+
+# Python (Backend)
+
+# ======================
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env
+
+# Local database / vector DB
+
+chroma_db/
+*.sqlite3
+
+# Logs
+
+eval_log.json
+*.log
+
+# ======================
+
+# Node / Next.js (Frontend)
+
+# ======================
+
+node_modules/
+.next/
+out/
+build/
+
+# Env files
+
+.env.local
+.env.*.local
+
+# ======================
+
+# OS / Editor
+
+# ======================
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ======================
+
+# Misc
+
+# ======================
+
+*.lock
