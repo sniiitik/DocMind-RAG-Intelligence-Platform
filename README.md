@@ -18,6 +18,26 @@ This project was built to demonstrate production RAG thinking — not just "make
 
 ---
 
+## Screenshots
+
+### 📄 Upload Documents
+
+![Upload](images/upload.png)
+
+### 💬 Chat Interface
+
+![Chat](images/chat.png)
+
+### 💬 Chat (Example Query)
+
+![Chat Example](images/chat2.png)
+
+### 📊 Evaluation Dashboard
+
+![Dashboard](images/dashboard.png)
+
+---
+
 ## Architecture
 
 ```
