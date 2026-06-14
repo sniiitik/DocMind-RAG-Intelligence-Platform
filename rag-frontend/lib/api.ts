@@ -14,12 +14,29 @@ export async function listDocuments() {
     return res.json()
 }
 
-export async function queryDocuments(question: string, topK = 5) {
+export type QueryPayload = {
+    question: string
+    top_k?: number
+    document_name?: string
+    page?: number
+    page_start?: number
+    page_end?: number
+    content_type?: 'text' | 'table'
+    metadata?: Record<string, string | number | boolean>
+}
+
+export async function queryDocuments(input: string | QueryPayload, topK = 5) {
+    const payload =
+        typeof input === 'string'
+            ? { question: input, top_k: topK }
+            : input
+
     const res = await fetch(`${BASE}/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, top_k: topK }),
+        body: JSON.stringify(payload),
     })
+
     if (!res.ok) throw new Error(await res.text())
     return res.json()
 }

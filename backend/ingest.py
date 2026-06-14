@@ -1,15 +1,22 @@
 # backend/ingest.py
 import os
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_huggingface import HuggingFaceEmbeddings
-import chromadb
 import tempfile
+import uuid
+from pathlib import Path
+from typing import List
+
+import chromadb
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import TextLoader
+from langchain_huggingface import HuggingFaceEmbeddings
+
+from pdf_parser import extract_pdf_pages_with_tables
+
 
 router = APIRouter()
 
-# Local embeddings — completely free, runs on your Mac
+# Local embeddings — free, runs locally
 embeddings_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
@@ -18,74 +25,265 @@ embeddings_model = HuggingFaceEmbeddings(
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection("documents")
 
+# Larger chunks + more overlap for better RAG context
 splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=50
+    chunk_size=1200,
+    chunk_overlap=250,
+    separators=["\n\n", "\n", ". ", " ", ""],
 )
+
+
+def get_file_suffix(file: UploadFile) -> str:
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+
+    if suffix in [".pdf", ".txt", ".md"]:
+        return suffix
+
+    if file.content_type == "application/pdf":
+        return ".pdf"
+
+    return ".txt"
+
+
+def delete_existing_document(filename: str) -> int:
+    """
+    Remove existing chunks for this document before re-ingesting.
+    This prevents duplicate chunks if the same file is uploaded again.
+    """
+    results = collection.get()
+
+    if not results.get("ids") or not results.get("metadatas"):
+        return 0
+
+    ids_to_delete = [
+        results["ids"][i]
+        for i, metadata in enumerate(results["metadatas"])
+        if metadata and metadata.get("source") == filename
+    ]
+
+    if ids_to_delete:
+        collection.delete(ids=ids_to_delete)
+
+    return len(ids_to_delete)
+
+
+def build_text_chunks(text: str) -> List[str]:
+    if not text or not text.strip():
+        return []
+
+    return [
+        chunk.strip()
+        for chunk in splitter.split_text(text)
+        if chunk and chunk.strip()
+    ]
+
+
+def ingest_pdf_file(tmp_path: str, filename: str):
+    pages = extract_pdf_pages_with_tables(tmp_path)
+
+    documents = []
+    metadatas = []
+    ids = []
+
+    chunk_index = 0
+
+    for page in pages:
+        page_number = page["page"]
+
+        # Normal page text chunks
+        for chunk in build_text_chunks(page.get("text", "")):
+            documents.append(chunk)
+            metadatas.append(
+                {
+                    "source": filename,
+                    "document_name": filename,
+                    "page": page_number,
+                    "chunk_index": chunk_index,
+                    "content_type": "text",
+                    "source_label": f"{filename}, page {page_number}",
+                }
+            )
+            ids.append(f"{filename}_{uuid.uuid4()}")
+            chunk_index += 1
+
+        # Table chunks, stored separately as markdown
+        for table_index, table_markdown in enumerate(page.get("tables", [])):
+            for chunk in build_text_chunks(table_markdown):
+                documents.append(chunk)
+                metadatas.append(
+                    {
+                        "source": filename,
+                        "document_name": filename,
+                        "page": page_number,
+                        "chunk_index": chunk_index,
+                        "content_type": "table",
+                        "table_index": table_index,
+                        "source_label": f"{filename}, page {page_number}, table {table_index + 1}",
+                    }
+                )
+                ids.append(f"{filename}_{uuid.uuid4()}")
+                chunk_index += 1
+
+    return documents, metadatas, ids
+
+
+def ingest_text_file(tmp_path: str, filename: str):
+    loader = TextLoader(tmp_path, encoding="utf-8")
+    docs = loader.load()
+
+    full_text = "\n\n".join(doc.page_content for doc in docs)
+
+    documents = []
+    metadatas = []
+    ids = []
+
+    for chunk_index, chunk in enumerate(build_text_chunks(full_text)):
+        documents.append(chunk)
+        metadatas.append(
+            {
+                "source": filename,
+                "document_name": filename,
+                "page": 1,
+                "chunk_index": chunk_index,
+                "content_type": "text",
+                "source_label": filename,
+            }
+        )
+        ids.append(f"{filename}_{uuid.uuid4()}")
+
+    return documents, metadatas, ids
+
 
 @router.post("/ingest")
 async def ingest_document(file: UploadFile = File(...)):
-    # Save upload to temp file
-    suffix = ".pdf" if file.content_type == "application/pdf" else ".txt"
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
+
+    suffix = get_file_suffix(file)
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        # Load document
+        deleted_count = delete_existing_document(file.filename)
+
         if suffix == ".pdf":
-            loader = PyPDFLoader(tmp_path)
+            texts, metadatas, ids = ingest_pdf_file(tmp_path, file.filename)
+        elif suffix in [".txt", ".md"]:
+            texts, metadatas, ids = ingest_text_file(tmp_path, file.filename)
         else:
-            loader = TextLoader(tmp_path)
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file type. Please upload PDF, TXT, or MD files.",
+            )
 
-        docs = loader.load()
-        chunks = splitter.split_documents(docs)
+        if not texts:
+            raise HTTPException(
+                status_code=400,
+                detail="No extractable text or tables found in this document.",
+            )
 
-        # Embed and store
-        texts = [c.page_content for c in chunks]
-        metadatas = [{"source": file.filename, "page": c.metadata.get("page", 0)} for c in chunks]
-        ids = [f"{file.filename}_{i}" for i in range(len(chunks))]
         embeds = embeddings_model.embed_documents(texts)
 
-        collection.add(documents=texts, embeddings=embeds, metadatas=metadatas, ids=ids)
+        collection.add(
+            documents=texts,
+            embeddings=embeds,
+            metadatas=metadatas,
+            ids=ids,
+        )
 
-        return {"message": f"Ingested {len(chunks)} chunks from {file.filename}"}
+        table_chunks = sum(1 for metadata in metadatas if metadata["content_type"] == "table")
+        text_chunks = sum(1 for metadata in metadatas if metadata["content_type"] == "text")
+
+        return {
+            "message": f"Ingested {len(texts)} chunks from {file.filename}",
+            "document": file.filename,
+            "deleted_existing_chunks": deleted_count,
+            "chunks_added": len(texts),
+            "text_chunks": text_chunks,
+            "table_chunks": table_chunks,
+        }
 
     finally:
         os.unlink(tmp_path)
 
+
 @router.get("/documents")
 def list_documents():
     results = collection.get()
-    sources = list(set(m["source"] for m in results["metadatas"])) if results["metadatas"] else []
-    return {"documents": sources, "total_chunks": len(results["ids"])}
+
+    metadatas = results.get("metadatas") or []
+    ids = results.get("ids") or []
+
+    documents = {}
+
+    for metadata in metadatas:
+        if not metadata:
+            continue
+
+        source = metadata.get("source")
+        if not source:
+            continue
+
+        if source not in documents:
+            documents[source] = {
+                "name": source,
+                "chunks": 0,
+                "pages": set(),
+                "text_chunks": 0,
+                "table_chunks": 0,
+            }
+
+        documents[source]["chunks"] += 1
+
+        page = metadata.get("page")
+        if page:
+            documents[source]["pages"].add(page)
+
+        if metadata.get("content_type") == "table":
+            documents[source]["table_chunks"] += 1
+        else:
+            documents[source]["text_chunks"] += 1
+
+    document_list = []
+
+    for document in documents.values():
+        pages = sorted(document["pages"])
+        document_list.append(
+            {
+                "name": document["name"],
+                "chunks": document["chunks"],
+                "pages": pages,
+                "page_count": len(pages),
+                "text_chunks": document["text_chunks"],
+                "table_chunks": document["table_chunks"],
+            }
+        )
+
+    return {
+        "documents": document_list,
+        "total_documents": len(document_list),
+        "total_chunks": len(ids),
+    }
+
 
 @router.delete("/documents/{filename}")
 def delete_document(filename: str):
     try:
-        # Get all docs
-        results = collection.get()
+        deleted_count = delete_existing_document(filename)
 
-        if not results["metadatas"]:
-            return {"message": "No documents found"}
-
-        # Find IDs that match this file
-        ids_to_delete = [
-            results["ids"][i]
-            for i, m in enumerate(results["metadatas"])
-            if m.get("source") == filename
-        ]
-
-        if not ids_to_delete:
+        if deleted_count == 0:
             raise HTTPException(status_code=404, detail="Document not found")
-
-        # Delete those chunks
-        collection.delete(ids=ids_to_delete)
 
         return {
             "message": f"Deleted {filename}",
-            "chunks_removed": len(ids_to_delete)
+            "chunks_removed": deleted_count,
         }
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

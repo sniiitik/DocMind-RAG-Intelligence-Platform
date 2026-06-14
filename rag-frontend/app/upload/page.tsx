@@ -2,7 +2,21 @@
 import { useState, useCallback, useEffect } from 'react'
 import { ingestDocument, listDocuments, deleteDocument } from '@/lib/api'
 
-type DocInfo = { name: string; status: 'uploading' | 'done' | 'error'; chunks?: number; error?: string }
+type DocInfo = {
+    name: string
+    status: 'uploading' | 'done' | 'error'
+    chunks?: number
+    error?: string
+}
+
+type IngestedDocument = {
+    name: string
+    chunks: number
+    pages: number[]
+    page_count: number
+    text_chunks: number
+    table_chunks: number
+}
 
 function FileIcon() {
     return (
@@ -13,13 +27,48 @@ function FileIcon() {
     )
 }
 
+function normalizeDocuments(documents: unknown[]): IngestedDocument[] {
+    return documents.map((doc) => {
+        if (typeof doc === 'string') {
+            return {
+                name: doc,
+                chunks: 0,
+                pages: [],
+                page_count: 0,
+                text_chunks: 0,
+                table_chunks: 0,
+            }
+        }
+
+        const d = doc as Partial<IngestedDocument>
+
+        return {
+            name: d.name || 'Unknown document',
+            chunks: d.chunks || 0,
+            pages: d.pages || [],
+            page_count: d.page_count || 0,
+            text_chunks: d.text_chunks || 0,
+            table_chunks: d.table_chunks || 0,
+        }
+    })
+}
+
 export default function UploadPage() {
     const [docs, setDocs] = useState<DocInfo[]>([])
-    const [ingestedSources, setIngestedSources] = useState<string[]>([])
+    const [ingestedSources, setIngestedSources] = useState<IngestedDocument[]>([])
     const [dragging, setDragging] = useState(false)
 
+    async function refreshDocuments() {
+        try {
+            const d = await listDocuments()
+            setIngestedSources(normalizeDocuments(d.documents || []))
+        } catch {
+            setIngestedSources([])
+        }
+    }
+
     useEffect(() => {
-        listDocuments().then(d => setIngestedSources(d.documents || [])).catch(() => { })
+        refreshDocuments()
     }, [])
 
     async function processFiles(files: FileList | File[]) {
@@ -34,19 +83,30 @@ export default function UploadPage() {
         for (const file of arr) {
             try {
                 const res = await ingestDocument(file)
-                setDocs(prev => prev.map(d => d.name === file.name ? { ...d, status: 'done', chunks: res.chunks } : d))
-                setIngestedSources(prev => [...new Set([...prev, file.name])])
+
+                setDocs(prev => prev.map(d =>
+                    d.name === file.name
+                        ? { ...d, status: 'done', chunks: res.chunks_added ?? res.chunks ?? 0 }
+                        : d
+                ))
+
+                await refreshDocuments()
             } catch (err) {
-                setDocs(prev => prev.map(d => d.name === file.name ? { ...d, status: 'error', error: String(err) } : d))
+                setDocs(prev => prev.map(d =>
+                    d.name === file.name
+                        ? { ...d, status: 'error', error: String(err) }
+                        : d
+                ))
             }
         }
     }
 
     async function handleDelete(name: string) {
         if (!confirm(`Are you sure you want to delete "${name}" from the knowledge base? This action cannot be undone.`)) return
+
         try {
             await deleteDocument(name)
-            setIngestedSources(prev => prev.filter(src => src !== name))
+            setIngestedSources(prev => prev.filter(src => src.name !== name))
             setDocs(prev => prev.filter(d => d.name !== name))
         } catch (err) {
             alert(`Failed to delete document: ${err instanceof Error ? err.message : String(err)}`)
@@ -54,7 +114,8 @@ export default function UploadPage() {
     }
 
     const onDrop = useCallback((e: React.DragEvent) => {
-        e.preventDefault(); setDragging(false)
+        e.preventDefault()
+        setDragging(false)
         processFiles(e.dataTransfer.files)
     }, [])
 
@@ -80,9 +141,13 @@ export default function UploadPage() {
                 onDrop={onDrop}
                 style={{
                     border: `1.5px dashed ${dragging ? 'var(--accent)' : 'var(--border-bright)'}`,
-                    borderRadius: 16, padding: '40px 24px', textAlign: 'center',
+                    borderRadius: 16,
+                    padding: '40px 24px',
+                    textAlign: 'center',
                     background: dragging ? 'var(--accent-glow)' : 'var(--bg-surface)',
-                    transition: 'all 0.2s ease', cursor: 'pointer', marginBottom: 28,
+                    transition: 'all 0.2s ease',
+                    cursor: 'pointer',
+                    marginBottom: 28,
                 }}
                 onClick={() => document.getElementById('file-input')?.click()}
             >
@@ -95,9 +160,15 @@ export default function UploadPage() {
                     onChange={e => e.target.files && processFiles(e.target.files)}
                 />
                 <div style={{
-                    width: 48, height: 48, borderRadius: 14, margin: '0 auto 16px',
-                    background: 'var(--accent-dim)', border: '1px solid rgba(124,106,247,0.25)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 48,
+                    height: 48,
+                    borderRadius: 14,
+                    margin: '0 auto 16px',
+                    background: 'var(--accent-dim)',
+                    border: '1px solid rgba(124,106,247,0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                 }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
@@ -120,9 +191,13 @@ export default function UploadPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {docs.map(doc => (
                             <div key={doc.name} style={{
-                                display: 'flex', alignItems: 'center', gap: 12,
-                                padding: '12px 16px', borderRadius: 10,
-                                background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 12,
+                                padding: '12px 16px',
+                                borderRadius: 10,
+                                background: 'var(--bg-surface)',
+                                border: '1px solid var(--border)',
                             }}>
                                 <span style={{ color: doc.status === 'done' ? 'var(--success)' : doc.status === 'error' ? 'var(--danger)' : 'var(--accent)' }}>
                                     <FileIcon />
@@ -131,12 +206,15 @@ export default function UploadPage() {
                                     <p style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                         {doc.name}
                                     </p>
-                                    {doc.status === 'uploading' && <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Processing…</p>}
+                                    {doc.status === 'uploading' && <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Processing...</p>}
                                     {doc.status === 'done' && <p style={{ fontSize: 11, color: 'var(--success)' }}>{doc.chunks} chunks indexed</p>}
-                                    {doc.status === 'error' && <p style={{ fontSize: 11, color: 'var(--danger)' }}>Failed — check backend</p>}
+                                    {doc.status === 'error' && <p style={{ fontSize: 11, color: 'var(--danger)' }}>Failed - check backend</p>}
                                 </div>
                                 <span style={{
-                                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: '50%',
+                                    flexShrink: 0,
                                     background: doc.status === 'done' ? 'var(--success)' : doc.status === 'error' ? 'var(--danger)' : 'var(--accent)',
                                     animation: doc.status === 'uploading' ? 'pulse-dot 1s infinite' : 'none',
                                 }} />
@@ -152,26 +230,57 @@ export default function UploadPage() {
                     <h2 style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10, fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                         Knowledge base · {ingestedSources.length} {ingestedSources.length === 1 ? 'document' : 'documents'}
                     </h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
                         {ingestedSources.map(src => (
-                            <div key={src} style={{
-                                display: 'flex', alignItems: 'center', gap: 10,
-                                padding: '12px 14px', borderRadius: 10,
-                                background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                            <div key={src.name} style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 10,
+                                padding: '12px 14px',
+                                borderRadius: 10,
+                                background: 'var(--bg-surface)',
+                                border: '1px solid var(--border)',
                             }}>
-                                <span style={{ color: 'var(--success)', flexShrink: 0 }}><FileIcon /></span>
-                                <span style={{
-                                    fontSize: 12, fontFamily: 'var(--font-mono)',
-                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                    color: 'var(--text-secondary)',
-                                }}>
-                                    {src}
+                                <span style={{ color: 'var(--success)', flexShrink: 0, marginTop: 2 }}>
+                                    <FileIcon />
                                 </span>
 
-                                <button onClick={() => handleDelete(src)} style={{
-                                    marginLeft: 'auto', padding: '3px 7px', fontSize: 11, color: 'var(--danger)',
-                                    background: 'transparent', border: '1px solid var(--danger)', borderRadius: 6,
-                                    cursor: 'pointer', transition: 'all 0.15s ease',
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{
+                                        fontSize: 12,
+                                        fontFamily: 'var(--font-mono)',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        color: 'var(--text-secondary)',
+                                    }}>
+                                        {src.name}
+                                    </div>
+
+                                    <div style={{
+                                        marginTop: 5,
+                                        fontSize: 11,
+                                        color: 'var(--text-muted)',
+                                        lineHeight: 1.5,
+                                    }}>
+                                        {src.page_count} pages · {src.chunks} chunks
+                                        <br />
+                                        {src.text_chunks} text · {src.table_chunks} table
+                                    </div>
+                                </div>
+
+                                <button onClick={() => handleDelete(src.name)} style={{
+                                    marginLeft: 'auto',
+                                    padding: '3px 7px',
+                                    fontSize: 11,
+                                    color: 'var(--danger)',
+                                    background: 'transparent',
+                                    border: '1px solid var(--danger)',
+                                    borderRadius: 6,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                    flexShrink: 0,
                                 }}
                                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--danger)'; (e.currentTarget as HTMLElement).style.color = '#fff' }}
                                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--danger)' }}
@@ -186,7 +295,7 @@ export default function UploadPage() {
 
             {ingestedSources.length === 0 && docs.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)', fontSize: 13 }}>
-                    No documents yet — upload your first file above
+                    No documents yet - upload your first file above
                 </div>
             )}
         </div>

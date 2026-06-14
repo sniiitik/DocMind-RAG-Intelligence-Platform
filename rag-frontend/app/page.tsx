@@ -1,15 +1,35 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
-import { queryDocuments, evaluateAnswer } from '@/lib/api'
+import { queryDocuments, evaluateAnswer, listDocuments } from '@/lib/api'
 
 type Message = {
   id: string
   role: 'user' | 'assistant'
   content: string
   sources?: string[]
-  context?: { text: string; source: string; page: number }[]
+  context?: {
+    text: string
+    source: string
+    document_name?: string
+    page: number
+    content_type?: string
+    source_label?: string
+    distance?: number
+    vector_score?: number
+    keyword_score?: number
+    rrf_score?: number
+    rerank_score?: number
+  }[]
   scores?: { faithfulness?: number; answer_relevancy?: number }
   loading?: boolean
+}
+type IndexedDocument = {
+  name: string
+  chunks: number
+  pages: number[]
+  page_count: number
+  text_chunks: number
+  table_chunks: number
 }
 
 const STORAGE_KEY = 'docmind_chat_history'
@@ -73,6 +93,56 @@ function saveHistory(msgs: Message[]) {
   }
 }
 
+function detectPageFilter(question: string): {
+  page?: number
+  page_start?: number
+  page_end?: number
+} {
+  const q = question.toLowerCase()
+
+  const rangePatterns = [
+    /\bpages?\s+(\d+)\s*(?:-|–|—|to|through|thru)\s*(\d+)\b/i,
+    /\bfrom\s+pages?\s+(\d+)\s*(?:-|–|—|to|through|thru)\s*(\d+)\b/i,
+    /\bpages?\s+(\d+)\s+and\s+(\d+)\b/i,
+  ]
+
+  for (const pattern of rangePatterns) {
+    const match = q.match(pattern)
+
+    if (match) {
+      const start = Number(match[1])
+      const end = Number(match[2])
+
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        return {
+          page_start: Math.min(start, end),
+          page_end: Math.max(start, end),
+        }
+      }
+    }
+  }
+
+  const singlePagePatterns = [
+    /\bpage\s+(\d+)\b/i,
+    /\bp\.\s*(\d+)\b/i,
+    /\bpg\.?\s*(\d+)\b/i,
+  ]
+
+  for (const pattern of singlePagePatterns) {
+    const match = q.match(pattern)
+
+    if (match) {
+      const page = Number(match[1])
+
+      if (Number.isFinite(page)) {
+        return { page }
+      }
+    }
+  }
+
+  return {}
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [hydrated, setHydrated] = useState(false)
@@ -81,6 +151,11 @@ export default function ChatPage() {
   const [expandedCtx, setExpandedCtx] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [documents, setDocuments] = useState<IndexedDocument[]>([])
+  const [selectedDocument, setSelectedDocument] = useState('')
+  const [pageStart, setPageStart] = useState('')
+  const [pageEnd, setPageEnd] = useState('')
+  const [contentType, setContentType] = useState<'all' | 'text' | 'table'>('all')
 
   // Load from localStorage on first mount (client only)
   useEffect(() => {
@@ -93,6 +168,32 @@ export default function ChatPage() {
     if (!hydrated) return
     saveHistory(messages)
   }, [messages, hydrated])
+
+  useEffect(() => {
+    listDocuments()
+      .then(data => {
+        const docs = data.documents || []
+        setDocuments(
+          docs.map((doc: string | IndexedDocument) => {
+            if (typeof doc === 'string') {
+              return {
+                name: doc,
+                chunks: 0,
+                pages: [],
+                page_count: 0,
+                text_chunks: 0,
+                table_chunks: 0,
+              }
+            }
+
+            return doc
+          })
+        )
+      })
+      .catch(() => {
+        setDocuments([])
+      })
+  }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -114,7 +215,45 @@ export default function ChatPage() {
     setIsLoading(true)
 
     try {
-      const data = await queryDocuments(q)
+      const detectedPageFilter = detectPageFilter(q)
+
+      if (!pageStart && !pageEnd) {
+        if (detectedPageFilter.page) {
+          setPageStart(String(detectedPageFilter.page))
+          setPageEnd(String(detectedPageFilter.page))
+        } else if (detectedPageFilter.page_start || detectedPageFilter.page_end) {
+          if (detectedPageFilter.page_start) {
+            setPageStart(String(detectedPageFilter.page_start))
+          }
+          if (detectedPageFilter.page_end) {
+            setPageEnd(String(detectedPageFilter.page_end))
+          }
+        }
+      }
+
+      const hasManualPageFilter = Boolean(pageStart || pageEnd)
+      const hasDetectedPageFilter = Boolean(
+        detectedPageFilter.page ||
+        detectedPageFilter.page_start ||
+        detectedPageFilter.page_end
+      )
+
+      const payload = {
+        question: q,
+        top_k: hasManualPageFilter || hasDetectedPageFilter ? 12 : 5,
+        ...(selectedDocument ? { document_name: selectedDocument } : {}),
+
+        // Manual UI filters take priority.
+        ...(pageStart ? { page_start: Number(pageStart) } : {}),
+        ...(pageEnd ? { page_end: Number(pageEnd) } : {}),
+
+        // Auto-detected page filters are used only when manual fields are empty.
+        ...(!hasManualPageFilter ? detectedPageFilter : {}),
+
+        ...(contentType !== 'all' ? { content_type: contentType } : {}),
+      }
+
+      const data = await queryDocuments(payload)
       const contexts = data.context?.map((c: { text: string }) => c.text) || []
 
       setMessages(prev => prev.map(m =>
@@ -299,8 +438,32 @@ export default function ChatPage() {
                             fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)',
                           }}>
                             <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, fontFamily: 'var(--font-mono)' }}>
-                              {c.source} · page {c.page}
+                              {c.source_label || c.source} · page {c.page}
+                              {c.content_type && <> · {c.content_type}</>}
                             </div>
+
+                            <div style={{
+                              display: 'flex',
+                              gap: 6,
+                              flexWrap: 'wrap',
+                              marginBottom: 8,
+                              fontSize: 10,
+                              color: 'var(--text-muted)',
+                            }}>
+                              {c.vector_score != null && (
+                                <span>vector: {Number(c.vector_score).toFixed(3)}</span>
+                              )}
+                              {c.keyword_score != null && (
+                                <span>keyword: {Number(c.keyword_score).toFixed(3)}</span>
+                              )}
+                              {c.rrf_score != null && (
+                                <span>fusion: {Number(c.rrf_score).toFixed(4)}</span>
+                              )}
+                              {c.rerank_score != null && (
+                                <span>rerank: {Number(c.rerank_score).toFixed(3)}</span>
+                              )}
+                            </div>
+
                             {c.text}
                           </div>
                         ))}
@@ -316,11 +479,114 @@ export default function ChatPage() {
       </div>
 
       {/* Input */}
+      {/* Input */}
       <div style={{
         padding: '16px 32px 24px',
         borderTop: '1px solid var(--border)',
         background: 'var(--bg-surface)',
       }}>
+
+        {/* Filters */}
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          marginBottom: 10,
+          alignItems: 'center',
+        }}>
+          <select
+            value={selectedDocument}
+            onChange={e => setSelectedDocument(e.target.value)}
+            style={{
+              background: 'var(--bg-raised)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              borderRadius: 8,
+              padding: '7px 10px',
+              fontSize: 12,
+              maxWidth: 220,
+            }}
+          >
+            <option value="">All documents</option>
+            {documents.map(doc => (
+              <option key={doc.name} value={doc.name}>
+                {doc.name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            value={pageStart}
+            onChange={e => setPageStart(e.target.value)}
+            placeholder="Page from"
+            inputMode="numeric"
+            style={{
+              width: 90,
+              background: 'var(--bg-raised)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              borderRadius: 8,
+              padding: '7px 10px',
+              fontSize: 12,
+            }}
+          />
+
+          <input
+            value={pageEnd}
+            onChange={e => setPageEnd(e.target.value)}
+            placeholder="Page to"
+            inputMode="numeric"
+            style={{
+              width: 90,
+              background: 'var(--bg-raised)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              borderRadius: 8,
+              padding: '7px 10px',
+              fontSize: 12,
+            }}
+          />
+
+          <select
+            value={contentType}
+            onChange={e => setContentType(e.target.value as 'all' | 'text' | 'table')}
+            style={{
+              background: 'var(--bg-raised)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              borderRadius: 8,
+              padding: '7px 10px',
+              fontSize: 12,
+            }}
+          >
+            <option value="all">All content</option>
+            <option value="text">Text only</option>
+            <option value="table">Tables only</option>
+          </select>
+
+          {(selectedDocument || pageStart || pageEnd || contentType !== 'all') && (
+            <button
+              onClick={() => {
+                setSelectedDocument('')
+                setPageStart('')
+                setPageEnd('')
+                setContentType('all')
+              }}
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                color: 'var(--text-muted)',
+                borderRadius: 8,
+                padding: '7px 10px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         <div style={{
           display: 'flex', gap: 10, alignItems: 'flex-end',
           background: 'var(--bg-raised)', borderRadius: 14,
@@ -358,6 +624,11 @@ export default function ChatPage() {
         </div>
         <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 8 }}>
           Enter to send · Shift+Enter for new line · history saved automatically
+          {(selectedDocument || pageStart || pageEnd || contentType !== 'all') && (
+            <>
+              {' '}· filters active
+            </>
+          )}
         </p>
       </div>
     </div>
