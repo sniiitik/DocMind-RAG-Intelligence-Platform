@@ -4,6 +4,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import List
+import re
 
 import chromadb
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -79,6 +80,37 @@ def build_text_chunks(text: str) -> List[str]:
     ]
 
 
+def infer_section_title(chunk: str) -> str | None:
+    lines = [line.strip() for line in chunk.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    first_line = lines[0][:120]
+
+    if len(first_line.split()) <= 12:
+        if first_line.isupper():
+            return first_line.title()
+
+        if re.match(r"^(\d+(\.\d+)*)\s+.+", first_line):
+            return first_line
+
+        if len(first_line) <= 80 and first_line[-1:] not in ".!?":
+            return first_line
+
+    return None
+
+
+def text_density(chunk: str) -> str:
+    words = chunk.split()
+    if not words:
+        return "low"
+    if len(words) >= 180:
+        return "high"
+    if len(words) >= 90:
+        return "medium"
+    return "low"
+
+
 def ingest_pdf_file(tmp_path: str, filename: str):
     pages = extract_pdf_pages_with_tables(tmp_path)
 
@@ -93,6 +125,7 @@ def ingest_pdf_file(tmp_path: str, filename: str):
 
         # Normal page text chunks
         for chunk in build_text_chunks(page.get("text", "")):
+            section_title = infer_section_title(chunk)
             documents.append(chunk)
             metadatas.append(
                 {
@@ -102,6 +135,9 @@ def ingest_pdf_file(tmp_path: str, filename: str):
                     "chunk_index": chunk_index,
                     "content_type": "text",
                     "source_label": f"{filename}, page {page_number}",
+                    "section_title": section_title,
+                    "structure_hint": "section" if section_title else "body",
+                    "text_density": text_density(chunk),
                 }
             )
             ids.append(f"{filename}_{uuid.uuid4()}")
@@ -110,6 +146,7 @@ def ingest_pdf_file(tmp_path: str, filename: str):
         # Table chunks, stored separately as markdown
         for table_index, table_markdown in enumerate(page.get("tables", [])):
             for chunk in build_text_chunks(table_markdown):
+                section_title = infer_section_title(chunk)
                 documents.append(chunk)
                 metadatas.append(
                     {
@@ -120,6 +157,9 @@ def ingest_pdf_file(tmp_path: str, filename: str):
                         "content_type": "table",
                         "table_index": table_index,
                         "source_label": f"{filename}, page {page_number}, table {table_index + 1}",
+                        "section_title": section_title,
+                        "structure_hint": "table",
+                        "text_density": text_density(chunk),
                     }
                 )
                 ids.append(f"{filename}_{uuid.uuid4()}")
@@ -139,6 +179,7 @@ def ingest_text_file(tmp_path: str, filename: str):
     ids = []
 
     for chunk_index, chunk in enumerate(build_text_chunks(full_text)):
+        section_title = infer_section_title(chunk)
         documents.append(chunk)
         metadatas.append(
             {
@@ -148,6 +189,9 @@ def ingest_text_file(tmp_path: str, filename: str):
                 "chunk_index": chunk_index,
                 "content_type": "text",
                 "source_label": filename,
+                "section_title": section_title,
+                "structure_hint": "section" if section_title else "body",
+                "text_density": text_density(chunk),
             }
         )
         ids.append(f"{filename}_{uuid.uuid4()}")

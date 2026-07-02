@@ -18,10 +18,14 @@ export type QueryPayload = {
     question: string
     top_k?: number
     document_name?: string
+    document_names?: string[]
     page?: number
     page_start?: number
     page_end?: number
     content_type?: 'text' | 'table'
+    mode?: 'qa' | 'summary' | 'compare' | 'risks' | 'action_items' | 'timeline' | 'table_insights'
+    session_id?: string
+    conversation?: { role: 'user' | 'assistant'; content: string }[]
     metadata?: Record<string, string | number | boolean>
 }
 
@@ -41,11 +45,27 @@ export async function queryDocuments(input: string | QueryPayload, topK = 5) {
     return res.json()
 }
 
-export async function evaluateAnswer(question: string, answer: string, contexts: string[]) {
+export async function evaluateAnswer(
+    question: string,
+    answer: string,
+    contexts: string[],
+    options?: {
+        mode?: string
+        retrieval_mode?: string
+        traceability?: Array<{ sentence: string; supports: Array<{ score: number }> }>
+    }
+) {
     const res = await fetch(`${BASE}/api/evaluate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, answer, contexts }),
+        body: JSON.stringify({
+            question,
+            answer,
+            contexts,
+            mode: options?.mode,
+            retrieval_mode: options?.retrieval_mode,
+            traceability: options?.traceability || [],
+        }),
     })
     if (!res.ok) throw new Error(await res.text())
     return res.json()

@@ -6,6 +6,7 @@ type Theme = 'dark' | 'light'
 
 type ThemeContextValue = {
     theme: Theme
+    mounted: boolean
     toggleTheme: () => void
 }
 
@@ -19,30 +20,32 @@ function applyTheme(theme: Theme) {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const [theme, setTheme] = useState<Theme>('dark')
+    const [mounted, setMounted] = useState(false)
 
     useEffect(() => {
         const savedTheme = window.localStorage.getItem(STORAGE_KEY)
 
-        if (savedTheme === 'dark' || savedTheme === 'light') {
-            setTheme(savedTheme)
-            applyTheme(savedTheme)
-            return
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+            queueMicrotask(() => setTheme(savedTheme))
         }
 
-        applyTheme('dark')
+        queueMicrotask(() => setMounted(true))
     }, [])
 
     useEffect(() => {
         applyTheme(theme)
-        window.localStorage.setItem(STORAGE_KEY, theme)
-    }, [theme])
+        if (mounted) {
+            window.localStorage.setItem(STORAGE_KEY, theme)
+        }
+    }, [mounted, theme])
 
     const value = useMemo(
         () => ({
             theme,
+            mounted,
             toggleTheme: () => setTheme(current => current === 'dark' ? 'light' : 'dark'),
         }),
-        [theme]
+        [mounted, theme]
     )
 
     return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

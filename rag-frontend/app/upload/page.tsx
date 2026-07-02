@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { ingestDocument, listDocuments, deleteDocument } from '@/lib/api'
 
 type DocInfo = {
@@ -113,11 +113,11 @@ export default function UploadPage() {
         }
     }
 
-    const onDrop = useCallback((e: React.DragEvent) => {
+    function onDrop(e: React.DragEvent) {
         e.preventDefault()
         setDragging(false)
         processFiles(e.dataTransfer.files)
-    }, [])
+    }
 
     return (
         <div style={{ padding: '32px', maxWidth: 780, margin: '0 auto' }}>

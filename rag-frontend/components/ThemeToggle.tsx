@@ -3,8 +3,10 @@
 import { useTheme } from '@/components/ThemeProvider'
 
 export default function ThemeToggle() {
-    const { theme, toggleTheme } = useTheme()
+    const { theme, mounted, toggleTheme } = useTheme()
     const isDark = theme === 'dark'
+    const label = !mounted ? 'Theme' : isDark ? 'Dark mode' : 'Light mode'
+    const nextLabel = isDark ? 'light' : 'dark'
 
     return (
         <button
@@ -23,11 +25,16 @@ export default function ThemeToggle() {
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
             }}
-            aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            aria-label={mounted ? `Switch to ${nextLabel} mode` : 'Theme toggle'}
+            title={mounted ? `Switch to ${nextLabel} mode` : 'Theme toggle'}
         >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                {isDark ? (
+                {!mounted ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <circle cx="12" cy="12" r="4" />
+                        <path strokeLinecap="round" d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77" />
+                    </svg>
+                ) : isDark ? (
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3c0 0 0 0 0 0A7 7 0 0021 12.79z" />
                     </svg>
@@ -37,7 +44,7 @@ export default function ThemeToggle() {
                         <path strokeLinecap="round" d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77" />
                     </svg>
                 )}
-                {isDark ? 'Dark mode' : 'Light mode'}
+                {label}
             </span>
             <span style={{
                 width: 38,
@@ -51,7 +58,7 @@ export default function ThemeToggle() {
                 <span style={{
                     position: 'absolute',
                     top: 2,
-                    left: isDark ? 18 : 2,
+                    left: mounted ? (isDark ? 18 : 2) : 18,
                     width: 16,
                     height: 16,
                     borderRadius: '50%',

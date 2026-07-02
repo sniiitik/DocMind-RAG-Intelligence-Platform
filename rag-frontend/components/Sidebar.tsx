@@ -1,7 +1,18 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import ThemeToggle from '@/components/ThemeToggle'
+import {
+    CHAT_SELECTED_EVENT,
+    CHAT_UPDATED_EVENT,
+    getActiveStoredChatId,
+    loadStoredChats,
+    requestNewStoredChat,
+    requestDeleteStoredChat,
+    setActiveStoredChat,
+    StoredChatSession,
+} from '@/lib/chatSessions'
 
 const nav = [
     {
@@ -35,6 +46,35 @@ const nav = [
 
 export default function Sidebar() {
     const pathname = usePathname()
+    const router = useRouter()
+    const [chats, setChats] = useState<StoredChatSession[]>([])
+    const [activeChatId, setActiveChatId] = useState('')
+    const [hoveredChatId, setHoveredChatId] = useState('')
+    const activeChat = chats.find(chat => chat.id === activeChatId)
+    const activeChatIsEmpty = !activeChat || !activeChat.messages || activeChat.messages.length === 0
+
+    useEffect(() => {
+        function refreshChats() {
+            setChats(
+                loadStoredChats()
+                    .slice()
+                    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                    .slice(0, 6)
+            )
+            setActiveChatId(getActiveStoredChatId())
+        }
+
+        refreshChats()
+        window.addEventListener(CHAT_SELECTED_EVENT, refreshChats)
+        window.addEventListener(CHAT_UPDATED_EVENT, refreshChats)
+        window.addEventListener('storage', refreshChats)
+
+        return () => {
+            window.removeEventListener(CHAT_SELECTED_EVENT, refreshChats)
+            window.removeEventListener(CHAT_UPDATED_EVENT, refreshChats)
+            window.removeEventListener('storage', refreshChats)
+        }
+    }, [])
 
     return (
         <aside style={{
@@ -101,6 +141,97 @@ export default function Sidebar() {
                         </Link>
                     )
                 })}
+
+                <div style={{ marginTop: 14, padding: '0 8px' }}>
+                    <button
+                        onClick={() => {
+                            requestNewStoredChat()
+                            router.push('/')
+                        }}
+                        style={{
+                            width: '100%',
+                            padding: '9px 12px',
+                            borderRadius: 8,
+                            border: '1px solid var(--border)',
+                            background: activeChatIsEmpty ? 'var(--bg-surface)' : 'var(--bg-raised)',
+                            color: activeChatIsEmpty ? 'var(--text-muted)' : 'var(--text-secondary)',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            opacity: activeChatIsEmpty ? 0.75 : 1,
+                        }}
+                        title={activeChatIsEmpty ? 'Finish or delete the current empty chat before creating another.' : 'Start a new chat'}
+                    >
+                        + New chat
+                    </button>
+                </div>
+
+                {chats.length > 0 && (
+                    <div style={{ marginTop: 14, padding: '0 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <p style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '0 4px' }}>
+                            Recent Chats
+                        </p>
+                        {chats.map(chat => {
+                            const active = pathname === '/' && chat.id === activeChatId
+                            return (
+                                <div
+                                    key={chat.id}
+                                    onMouseEnter={() => setHoveredChatId(chat.id)}
+                                    onMouseLeave={() => setHoveredChatId(current => current === chat.id ? '' : current)}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: 6,
+                                        padding: '8px 10px',
+                                        borderRadius: 8,
+                                        background: active ? 'var(--bg-hover)' : 'transparent',
+                                        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                        border: active ? '1px solid var(--border)' : '1px solid transparent',
+                                    }}
+                                >
+                                    <Link
+                                        href="/"
+                                        onClick={() => {
+                                            setActiveChatId(chat.id)
+                                            setActiveStoredChat(chat.id)
+                                        }}
+                                        style={{
+                                            flex: 1,
+                                            minWidth: 0,
+                                            color: 'inherit',
+                                            textDecoration: 'none',
+                                        }}
+                                    >
+                                        <div style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            {chat.title || 'New chat'}
+                                        </div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                                            {new Date(chat.updatedAt).toLocaleDateString()}
+                                        </div>
+                                    </Link>
+                                    <button
+                                        onClick={() => requestDeleteStoredChat(chat.id)}
+                                        aria-label={`Delete ${chat.title || 'chat'}`}
+                                        title="Delete chat"
+                                        style={{
+                                            border: 'none',
+                                            background: 'transparent',
+                                            color: hoveredChatId === chat.id ? 'var(--text-muted)' : 'transparent',
+                                            cursor: 'pointer',
+                                            fontSize: 14,
+                                            lineHeight: 1,
+                                            padding: 0,
+                                            flexShrink: 0,
+                                            transition: 'color 0.15s ease',
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            )
+                        })}
+                    </div>
+                )}
             </nav>
 
             {/* Footer */}

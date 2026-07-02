@@ -4,7 +4,17 @@ import { clearEvalHistory, getEvalHistory } from '@/lib/api'
 
 type EvalEntry = {
     question: string
-    scores: { faithfulness?: number; answer_relevancy?: number }
+    timestamp?: string
+    mode?: string
+    retrieval_mode?: string
+    scores: {
+        faithfulness?: number
+        answer_relevancy?: number
+        groundedness?: number
+        citation_precision?: number
+        answer_completeness?: number
+        retrieval_recall?: number
+    }
 }
 
 function MetricCard({ label, value, description }: { label: string; value: number | null; description: string }) {
@@ -66,13 +76,15 @@ export default function DashboardPage() {
         }
     }
 
-    const avg = (key: 'faithfulness' | 'answer_relevancy') => {
+    const avg = (key: keyof EvalEntry['scores']) => {
         const vals = history.map(h => h.scores[key]).filter((v): v is number => v != null)
         return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
     }
 
     const avgFaith = avg('faithfulness')
     const avgRel = avg('answer_relevancy')
+    const avgGrounded = avg('groundedness')
+    const avgCitations = avg('citation_precision')
     const overallScore = avgFaith != null && avgRel != null ? (avgFaith + avgRel) / 2 : null
 
     return (
@@ -85,13 +97,17 @@ export default function DashboardPage() {
                 <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
                     RAGAS evaluation metrics across all queries
                 </p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8, maxWidth: 640, lineHeight: 1.6 }}>
+                    Scores are mode-calibrated. Direct Q&A is graded more strictly, while summary, compare, and other synthesis-heavy modes use fairer thresholds for paraphrase, evidence spread, and multi-document coverage.
+                </p>
             </div>
 
             {/* Summary cards */}
-            <div className="fade-up-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 32 }}>
+            <div className="fade-up-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 32 }}>
                 <MetricCard label="Overall score" value={overallScore} description="Average across all metrics" />
                 <MetricCard label="Faithfulness" value={avgFaith} description="Answer grounded in context" />
                 <MetricCard label="Relevance" value={avgRel} description="Answer addresses the question" />
+                <MetricCard label="Citation precision" value={avgCitations ?? avgGrounded} description="Answer sentences backed by evidence" />
             </div>
 
             {/* History */}
@@ -147,6 +163,11 @@ export default function DashboardPage() {
                                 <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', lineHeight: 1.4 }}>
                                     {entry.question}
                                 </p>
+                                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    {entry.mode ? `Mode: ${entry.mode.replaceAll('_', ' ')}` : 'Mode: qa'}
+                                    {entry.retrieval_mode ? ` · ${entry.retrieval_mode}` : ''}
+                                    {entry.timestamp ? ` · ${new Date(entry.timestamp).toLocaleString()}` : ''}
+                                </p>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                     {entry.scores.faithfulness != null && (
                                         <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', alignItems: 'center', gap: 10 }}>
@@ -158,6 +179,18 @@ export default function DashboardPage() {
                                         <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', alignItems: 'center', gap: 10 }}>
                                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Relevance</span>
                                             <ScoreBar value={entry.scores.answer_relevancy} />
+                                        </div>
+                                    )}
+                                    {entry.scores.citation_precision != null && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', alignItems: 'center', gap: 10 }}>
+                                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Citations</span>
+                                            <ScoreBar value={entry.scores.citation_precision} />
+                                        </div>
+                                    )}
+                                    {entry.scores.answer_completeness != null && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', alignItems: 'center', gap: 10 }}>
+                                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Complete</span>
+                                            <ScoreBar value={entry.scores.answer_completeness} />
                                         </div>
                                     )}
                                 </div>
