@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { getEvalHistory } from '@/lib/api'
+import { clearEvalHistory, getEvalHistory } from '@/lib/api'
 
 type EvalEntry = {
     question: string
@@ -42,10 +42,29 @@ function ScoreBar({ value }: { value: number }) {
 export default function DashboardPage() {
     const [history, setHistory] = useState<EvalEntry[]>([])
     const [loading, setLoading] = useState(true)
+    const [clearing, setClearing] = useState(false)
 
     useEffect(() => {
         getEvalHistory().then(d => setHistory(d.history || [])).catch(() => { }).finally(() => setLoading(false))
     }, [])
+
+    async function handleClearHistory() {
+        if (!history.length || clearing) return
+
+        const confirmed = confirm(`Clear all ${history.length} eval ${history.length === 1 ? 'entry' : 'entries'} from the dashboard?`)
+        if (!confirmed) return
+
+        setClearing(true)
+
+        try {
+            await clearEvalHistory()
+            setHistory([])
+        } catch (err) {
+            alert(`Failed to clear eval history: ${err instanceof Error ? err.message : String(err)}`)
+        } finally {
+            setClearing(false)
+        }
+    }
 
     const avg = (key: 'faithfulness' | 'answer_relevancy') => {
         const vals = history.map(h => h.scores[key]).filter((v): v is number => v != null)
@@ -81,6 +100,23 @@ export default function DashboardPage() {
                     <h2 style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                         Query log · {history.length} {history.length === 1 ? 'entry' : 'entries'}
                     </h2>
+                    {history.length > 0 && (
+                        <button
+                            onClick={handleClearHistory}
+                            disabled={clearing}
+                            style={{
+                                padding: '7px 10px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                background: 'transparent',
+                                border: '1px solid var(--border)',
+                                color: clearing ? 'var(--text-muted)' : 'var(--text-secondary)',
+                                cursor: clearing ? 'default' : 'pointer',
+                            }}
+                        >
+                            {clearing ? 'Clearing...' : 'Clear history'}
+                        </button>
+                    )}
                 </div>
 
                 {loading && (

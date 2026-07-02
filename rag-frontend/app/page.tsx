@@ -339,8 +339,21 @@ export default function ChatPage() {
               background: 'var(--accent-dim)', border: '1px solid rgba(124,106,247,0.2)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M7 3.5h7.2L18 7.3v13.2H7a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z" />
+                <path d="M14 3.5V7a1 1 0 0 0 1 1h3" />
+                <path d="M8.5 12h7" />
+                <path d="M8.5 15h7" />
+                <path d="M8.5 18h4.5" />
               </svg>
             </div>
             <div style={{ textAlign: 'center' }}>
@@ -383,8 +396,21 @@ export default function ChatPage() {
                     background: 'var(--accent-dim)', border: '1px solid rgba(124,106,247,0.3)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--accent)"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M7 3.5h7.2L18 7.3v13.2H7a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z" />
+                      <path d="M14 3.5V7a1 1 0 0 0 1 1h3" />
+                      <path d="M8.5 12h7" />
+                      <path d="M8.5 15h7" />
+                      <path d="M8.5 18h4.5" />
                     </svg>
                   </div>
                   <div style={{ flex: 1 }}>

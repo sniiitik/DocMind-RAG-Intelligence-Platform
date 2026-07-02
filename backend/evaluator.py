@@ -1,5 +1,5 @@
 import os, json, re, math
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -54,29 +54,45 @@ class EvalRequest(BaseModel):
     answer: str
     contexts: list
 
+
+def load_eval_logs() -> list:
+    if not os.path.exists(EVAL_LOG):
+        return []
+
+    with open(EVAL_LOG) as f:
+        try:
+            return json.load(f)
+        except Exception:
+            return []
+
+
+def save_eval_logs(logs: list) -> None:
+    with open(EVAL_LOG, "w") as f:
+        json.dump(logs, f)
+
 @router.post("/evaluate")
 def evaluate_answer(req: EvalRequest):
     faithfulness = score_faithfulness(req.answer, req.contexts)
     relevancy    = score_relevancy(req.question, req.answer)
     scores = {"faithfulness": faithfulness, "answer_relevancy": relevancy}
-    logs = []
-    if os.path.exists(EVAL_LOG):
-        with open(EVAL_LOG) as f:
-            try:
-                logs = json.load(f)
-            except Exception:
-                logs = []
+    logs = load_eval_logs()
     logs.append({"question": req.question, "scores": scores})
-    with open(EVAL_LOG, "w") as f:
-        json.dump(logs, f)
+    save_eval_logs(logs)
     return {"scores": scores}
 
 @router.get("/eval-history")
 def eval_history():
-    if not os.path.exists(EVAL_LOG):
-        return {"history": []}
-    with open(EVAL_LOG) as f:
-        try:
-            return {"history": json.load(f)}
-        except Exception:
-            return {"history": []}
+    return {"history": load_eval_logs()}
+
+
+@router.delete("/eval-history")
+def clear_eval_history():
+    try:
+        cleared_entries = len(load_eval_logs())
+        save_eval_logs([])
+        return {
+            "message": "Eval history cleared",
+            "cleared_entries": cleared_entries,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

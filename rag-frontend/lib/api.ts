@@ -57,6 +57,14 @@ export async function getEvalHistory() {
     return res.json()
 }
 
+export async function clearEvalHistory() {
+    const res = await fetch(`${BASE}/api/eval-history`, {
+        method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+}
+
 export async function deleteDocument(name: string) {
     const res = await fetch(`${BASE}/api/documents/${encodeURIComponent(name)}`, {
         method: 'DELETE',
